@@ -4,40 +4,66 @@ name: AI Scanner Build APK
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Lấy mã nguồn GitHub
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Cài Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # 3. Cài Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
+      # 4. Cài Gradle 8.9
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
 
+      # 5. Giải nén ZIP mã nguồn
       - name: Extract source ZIP
         run: |
+          if [ ! -f "AI_Scanner_Grade10_Starter.zip" ]; then
+            echo "ERROR: Khong tim thay file ZIP"
+            ls -la
+            exit 1
+          fi
+
           unzip -o AI_Scanner_Grade10_Starter.zip
 
+          echo "Danh sach thu muc sau khi giai nen:"
+          ls -la
+          ls -la ai_scanner_grade10
+
+      # 6. Build USER APK
       - name: Build USER APK
         working-directory: ai_scanner_grade10/user-android
         run: gradle assembleDebug
 
+      # 7. Build ADMIN APK
       - name: Build ADMIN APK
         working-directory: ai_scanner_grade10/admin-android
         run: gradle assembleDebug
 
+      # 8. Upload APK
       - name: Upload APK files
         uses: actions/upload-artifact@v4
         with:
