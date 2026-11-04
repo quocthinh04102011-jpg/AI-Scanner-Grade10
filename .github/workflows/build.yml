@@ -1,68 +1,176 @@
-name: Build and Test Project
+name: AI Scanner Build APK
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
 
 jobs:
-  build-backend:
-    name: Build & Test Backend
+  build:
+    name: Build USER and ADMIN APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      # 1. Lấy mã nguồn GitHub
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # 2. Cài Android SDK và chấp nhận license
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          accept-android-sdk-licenses: true
 
-      - name: Install dependencies
-        working-directory: ./ai_scanner_grade10/backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-  build-android:
-    name: Build Android Apps (User & Admin)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
+      # 3. Cài Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-          cache: 'gradle'
 
-      - name: Grant execute permission for Gradle wrapper
+      # 4. Cài Gradle 8.9
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # 5. Cài Android SDK packages (SDK 35)
+      - name: Install Android SDK packages
+        shell: bash
         run: |
-          chmod +x ./ai_scanner_grade10/user-android/gradlew
-          chmod +x ./ai_scanner_grade10/admin-android/gradlew
+          set -e
+          sdkmanager \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      - name: Build User Android App (Debug APK)
-        working-directory: ./ai_scanner_grade10/user-android
-        run: ./gradlew assembleDebug
+      # 6. Tìm ZIP nguồn
+      - name: Find source ZIP
+        id: source
+        shell: bash
+        run: |
+          set -e
+          ZIP_FILE="AI_Scanner_Grade10_Starter.zip"
 
-      - name: Build Admin Android App (Debug APK)
-        working-directory: ./ai_scanner_grade10/admin-android
-        run: ./gradlew assembleDebug
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Khong tim thay ZIP nguon."
+            echo "Hay upload ZIP vao goc repository."
+            echo "Cac file ZIP dang co:"
+            find . -type f -iname "*.zip"
+            exit 1
+          fi
 
-      - name: Upload User APK Artifact
+          echo "zip=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      # 7. Giải nén ZIP
+      - name: Extract source ZIP
+        shell: bash
+        run: |
+          set -e
+          mkdir -p source
+          unzip -o "${{ steps.source.outputs.zip }}" -d source
+          echo "Cau truc nguon:"
+          find source -maxdepth 4 -type d
+
+      # 8. Xác nhận project USER
+      - name: Check USER project
+        shell: bash
+        run: |
+          set -e
+          USER_DIR="source/ai_scanner_grade10/user-android"
+
+          if [ ! -f "$USER_DIR/settings.gradle.kts" ]; then
+            echo "ERROR: Khong tim thay USER settings.gradle.kts"
+            find source -type f
+            exit 1
+          fi
+
+          if [ ! -f "$USER_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: Khong tim thay USER app/build.gradle.kts"
+            exit 1
+          fi
+
+          echo "USER project OK"
+
+      # 9. Xác nhận project ADMIN
+      - name: Check ADMIN project
+        shell: bash
+        run: |
+          set -e
+          ADMIN_DIR="source/ai_scanner_grade10/admin-android"
+
+          if [ ! -f "$ADMIN_DIR/settings.gradle.kts" ]; then
+            echo "ERROR: Khong tim thay ADMIN settings.gradle.kts"
+            find source -type f
+            exit 1
+          fi
+
+          if [ ! -f "$ADMIN_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: Khong tim thay ADMIN app/build.gradle.kts"
+            exit 1
+          fi
+
+          echo "ADMIN project OK"
+
+      # 10. Build USER APK
+      - name: Build USER APK
+        shell: bash
+        run: |
+          set -e
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            -p source/ai_scanner_grade10/user-android \
+            assembleDebug
+
+      # 11. Build ADMIN APK
+      - name: Build ADMIN APK
+        shell: bash
+        run: |
+          set -e
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            -p source/ai_scanner_grade10/admin-android \
+            assembleDebug
+
+      # 12. Chuẩn bị file APK đầu ra
+      - name: Prepare APK files
+        shell: bash
+        run: |
+          set -e
+          mkdir -p output
+
+          USER_APK="source/ai_scanner_grade10/user-android/app/build/outputs/apk/debug/app-debug.apk"
+          ADMIN_APK="source/ai_scanner_grade10/admin-android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$USER_APK" ]; then
+            echo "ERROR: Khong tim thay APK USER"
+            find source/ai_scanner_grade10/user-android -type f -name "*.apk"
+            exit 1
+          fi
+
+          if [ ! -f "$ADMIN_APK" ]; then
+            echo "ERROR: Khong tim thay APK ADMIN"
+            find source/ai_scanner_grade10/admin-android -type f -name "*.apk"
+            exit 1
+          fi
+
+          cp "$USER_APK" output/AI-Scanner-USER.apk
+          cp "$ADMIN_APK" output/AI-Scanner-ADMIN.apk
+
+          echo "APK da tao thanh cong:"
+          ls -lh output/
+
+      # 13. Tải file APK lên Artifacts
+      - name: Upload APK files
         uses: actions/upload-artifact@v4
         with:
-          name: user-debug-apk
-          path: ./ai_scanner_grade10/user-android/app/build/outputs/apk/debug/*.apk
-
-      - name: Upload Admin APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: admin-debug-apk
-          path: ./ai_scanner_grade10/admin-android/app/build/outputs/apk/debug/*.apk
+          name: AI-Scanner-APK
+          path: output/*.apk
+          if-no-files-found: error
+          retention-days: 30
