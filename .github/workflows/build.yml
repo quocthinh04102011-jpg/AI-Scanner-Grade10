@@ -12,59 +12,116 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Lấy mã nguồn GitHub
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      # 2. Cài Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # 3. Cài Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
 
-      - name: Setup Gradle 8.9
+      # 4. Chấp nhận giấy phép Android SDK
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
+
+      # 5. Cài Android platform và build tools
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "platform-tools"
+
+      # 6. Cài Gradle 8.9
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Check and extract ZIP
+      # 7. Tìm và giải nén ZIP mã nguồn
+      - name: Extract source ZIP
+        id: source
+        shell: bash
         run: |
-          echo "Checking source ZIP..."
+          set -e
 
-          if [ ! -f "AI_Scanner_Grade10_Starter.zip" ]; then
-            echo "ERROR: Source ZIP not found"
-            echo "Files in repository:"
-            ls -la
+          ZIP_FILE=$(find . -maxdepth 2 \
+            -type f -iname "*.zip" \
+            ! -path "./.git/*" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Khong tim thay file ZIP"
+            echo "Danh sach file trong repo:"
+            find . -maxdepth 3 -type f
             exit 1
           fi
 
-          unzip -o AI_Scanner_Grade10_Starter.zip
+          echo "ZIP found: $ZIP_FILE"
 
-          echo "Extracted folders:"
-          ls -la
-          ls -la ai_scanner_grade10
+          mkdir -p source
+          unzip -o "$ZIP_FILE" -d source
 
+          echo "Files extracted:"
+          find source -maxdepth 4 -type f
+
+          if [ -d "source/ai_scanner_grade10" ]; then
+            ROOT="source/ai_scanner_grade10"
+          else
+            ROOT="source"
+          fi
+
+          if [ ! -d "$ROOT/user-android" ]; then
+            echo "ERROR: Khong tim thay user-android"
+            find source -maxdepth 5 -type d
+            exit 1
+          fi
+
+          if [ ! -d "$ROOT/admin-android" ]; then
+            echo "ERROR: Khong tim thay admin-android"
+            find source -maxdepth 5 -type d
+            exit 1
+          fi
+
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+
+      # 8. Build USER APK
       - name: Build USER APK
-        working-directory: ai_scanner_grade10/user-android
+        working-directory: ${{ steps.source.outputs.root }}/user-android
         run: gradle assembleDebug
 
+      # 9. Build ADMIN APK
       - name: Build ADMIN APK
-        working-directory: ai_scanner_grade10/admin-android
+        working-directory: ${{ steps.source.outputs.root }}/admin-android
         run: gradle assembleDebug
 
+      # 10. Kiểm tra APK
+      - name: Check APK files
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking USER APK..."
+          find "${{ steps.source.outputs.root }}/user-android" \
+            -type f -name "*.apk"
+
+          echo "Checking ADMIN APK..."
+          find "${{ steps.source.outputs.root }}/admin-android" \
+            -type f -name "*.apk"
+
+      # 11. Upload APK
       - name: Upload APK files
         uses: actions/upload-artifact@v4
         with:
           name: AI-Scanner-Grade10-APKs
           path: |
-            ai_scanner_grade10/user-android/app/build/outputs/apk/debug/*.apk
-            ai_scanner_grade10/admin-android/app/build/outputs/apk/debug/*.apk
+            ${{ steps.source.outputs.root }}/user-android/app/build/outputs/apk/debug/*.apk
+            ${{ steps.source.outputs.root }}/admin-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
