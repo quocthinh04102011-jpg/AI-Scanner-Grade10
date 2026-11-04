@@ -3,122 +3,56 @@ name: AI Scanner Build APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build AI Scanner USER and ADMIN
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Lay ma nguon GitHub
+      # 1. Lay ma nguon tu GitHub
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Cai Java 17
+      # 2. Cai Android SDK va chap nhan license
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+
+      # 3. Cai Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      # 3. Cai Android SDK
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 4. Tim sdkmanager
-      - name: Locate sdkmanager
-        id: sdk
-        shell: bash
-        run: |
-          set -e
-
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          if [ -z "$SDK_ROOT" ]; then
-            echo "ERROR: Android SDK path not found"
-            exit 1
-          fi
-
-          echo "Android SDK: $SDK_ROOT"
-
-          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -f "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" \
-              -type f -name sdkmanager 2>/dev/null | head -n 1)
-          fi
-
-          if [ -z "$SDKMANAGER" ] || [ ! -f "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager not found"
-            find "$SDK_ROOT" -maxdepth 5 -type f
-            exit 1
-          fi
-
-          echo "sdkmanager found: $SDKMAN"
-          echo "sdkmanager=$SDKMAN" >> "$GITHUB_OUTPUT"
-          echo "sdk_root=$SDK_ROOT" >> "$GITHUB_OUTPUT"
-
-      # 5. Chap nhan Android licenses
-      - name: Accept Android SDK licenses
-        shell: bash
-        run: |
-          set -e
-
-          SDKMANAGER="${{ steps.sdk.outputs.sdkmanager }}"
-          SDK_ROOT="${{ steps.sdk.outputs.sdk_root }}"
-
-          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses || true
-
-      # 6. Cai Android SDK packages
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          set -e
-
-          SDKMANAGER="${{ steps.sdk.outputs.sdkmanager }}"
-          SDK_ROOT="${{ steps.sdk.outputs.sdk_root }}"
-
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      # 7. Cai Gradle 8.9
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
-
-      # 8. Tim ZIP ma nguon
+      # 4. Tim file ZIP nguon
       - name: Find source ZIP
-        id: zip
+        id: source
         shell: bash
         run: |
           set -e
 
-          ZIP_FILE=""
+          ZIP_FILE="AI_Scanner_Grade10_Starter.zip"
 
-          if [ -f "AI_Scanner_Grade10_Starter.zip" ]; then
-            ZIP_FILE="AI_Scanner_Grade10_Starter.zip"
-          else
-            ZIP_FILE=$(find . -maxdepth 3 \
-              -type f -iname "*.zip" \
-              ! -path "./.git/*" | head -n 1)
-          fi
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Source ZIP not found"
-            echo "Repository files:"
-            find . -maxdepth 4 -type f
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Khong tim thay $ZIP_FILE"
+            echo "Cac file ZIP hien co:"
+            find . -type f -iname "*.zip"
             exit 1
           fi
 
-          echo "Source ZIP: $ZIP_FILE"
           echo "zip=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
-      # 9. Giai nen ZIP
+      # 5. Giai nen ma nguon
       - name: Extract source ZIP
         shell: bash
         run: |
@@ -126,81 +60,130 @@ jobs:
 
           mkdir -p source
 
-          unzip -o "${{ steps.zip.outputs.zip }}" -d source
+          unzip -o "${{ steps.source.outputs.zip }}" -d source
 
-          echo "Extracted folders:"
-          find source -maxdepth 5 -type d
+          echo "Danh sach file sau khi giai nen:"
+          find source -maxdepth 5 -type f | head -200
 
-      # 10. Tim USER va ADMIN project
-      - name: Locate Android projects
-        id: projects
+      # 6. Tim project USER
+      - name: Locate USER project
+        id: user
         shell: bash
         run: |
           set -e
 
-          USER_DIR=$(find source \
-            -type d -name user-android | head -n 1)
-
-          ADMIN_DIR=$(find source \
-            -type d -name admin-android | head -n 1)
+          USER_DIR="$(find source -type f -name gradlew \
+            -printf '%h\n' | grep 'user-android' | head -1)"
 
           if [ -z "$USER_DIR" ]; then
-            echo "ERROR: user-android not found"
-            find source -maxdepth 6 -type d
+            echo "ERROR: Khong tim thay project USER"
+            find source -type f -name gradlew
             exit 1
           fi
+
+          echo "dir=$USER_DIR" >> "$GITHUB_OUTPUT"
+
+      # 7. Tim project ADMIN
+      - name: Locate ADMIN project
+        id: admin
+        shell: bash
+        run: |
+          set -e
+
+          ADMIN_DIR="$(find source -type f -name gradlew \
+            -printf '%h\n' | grep 'admin-android' | head -1)"
 
           if [ -z "$ADMIN_DIR" ]; then
-            echo "ERROR: admin-android not found"
-            find source -maxdepth 6 -type d
+            echo "ERROR: Khong tim thay project ADMIN"
+            find source -type f -name gradlew
             exit 1
           fi
 
-          echo "USER_DIR=$USER_DIR" >> "$GITHUB_ENV"
-          echo "ADMIN_DIR=$ADMIN_DIR" >> "$GITHUB_ENV"
+          echo "dir=$ADMIN_DIR" >> "$GITHUB_OUTPUT"
 
-          echo "user_dir=$USER_DIR" >> "$GITHUB_OUTPUT"
-          echo "admin_dir=$ADMIN_DIR" >> "$GITHUB_OUTPUT"
+      # 8. Kiem tra Java va Gradle
+      - name: Check build tools
+        shell: bash
+        run: |
+          java -version
 
-      # 11. Build USER APK
+          echo "USER project:"
+          ls -la "${{ steps.user.outputs.dir }}"
+
+          echo "ADMIN project:"
+          ls -la "${{ steps.admin.outputs.dir }}"
+
+      # 9. Build APK USER
       - name: Build USER APK
+        working-directory: ${{ steps.user.outputs.dir }}
         shell: bash
         run: |
           set -e
 
-          cd "$USER_DIR"
+          chmod +x gradlew
 
-          if [ -f "gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug
-          elif [ -f "build.gradle" ] || \
-               [ -f "build.gradle.kts" ]; then
-            gradle assembleDebug
-          else
-            echo "ERROR: USER Gradle project not found"
-            ls -la
-            exit 1
-          fi
+          ./gradlew \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
 
-      # 12. Build ADMIN APK
+      # 10. Build APK ADMIN
       - name: Build ADMIN APK
+        working-directory: ${{ steps.admin.outputs.dir }}
         shell: bash
         run: |
           set -e
 
-          cd "$ADMIN_DIR"
+          chmod +x gradlew
 
-          if [ -f "gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug
-          elif [ -f "build.gradle" ] || \
-               [ -f "build.gradle.kts" ]; then
-            gradle assembleDebug
-          else
-            echo "ERROR: ADMIN Gradle project not found"
-            ls -la
+          ./gradlew \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
+
+      # 11. Tim APK USER
+      - name: Locate USER APK
+        id: userapk
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find "${{ steps.user.outputs.dir }}" \
+            -type f -name '*.apk' \
+            -path '*/outputs/apk/debug/*' | head -1)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: Khong tim thay APK USER"
+            find "${{ steps.user.outputs.dir }}" -type f -name '*.apk'
             exit 1
           fi
+
+          mkdir -p output
+
+          cp "$APK" output/AI-Scanner-USER.apk
+
+          echo "apk=output/AI-Scanner-USER.apk" >> "$GITHUB_OUTPUT"
+
+      # 12. Tim APK ADMIN
+      - name: Locate ADMIN APK
+        id: adminapk
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find "${{ steps.admin.outputs.dir }}" \
+            -type f -name '*.apk' \
+            -path '*/outputs/apk/debug/*' | head -1)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: Khong tim thay APK ADMIN"
+            find "${{ steps.admin.outputs.dir }}" -type f -name '*.apk'
+            exit 1
+          fi
+
+          cp "$APK" output/AI-Scanner-ADMIN.apk
+
+          echo "apk=output/AI-Scanner-ADMIN.apk" >> "$GITHUB_OUTPUT"
 
       # 13. Kiem tra APK
       - name: Check APK files
@@ -208,32 +191,16 @@ jobs:
         run: |
           set -e
 
-          USER_APK="$USER_DIR/app/build/outputs/apk/debug"
-          ADMIN_APK="$ADMIN_DIR/app/build/outputs/apk/debug"
+          test -s output/AI-Scanner-USER.apk
+          test -s output/AI-Scanner-ADMIN.apk
 
-          echo "USER APK:"
-          find "$USER_APK" -type f -name "*.apk"
-
-          echo "ADMIN APK:"
-          find "$ADMIN_APK" -type f -name "*.apk"
-
-          if ! find "$USER_APK" -type f -name "*.apk" | grep -q .; then
-            echo "ERROR: USER APK not generated"
-            exit 1
-          fi
-
-          if ! find "$ADMIN_APK" -type f -name "*.apk" | grep -q .; then
-            echo "ERROR: ADMIN APK not generated"
-            exit 1
-          fi
+          ls -lh output/
 
       # 14. Upload APK
       - name: Upload APK files
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Scanner-Grade10-APKs
-          path: |
-            ${{ steps.projects.outputs.user_dir }}/app/build/outputs/apk/debug/*.apk
-            ${{ steps.projects.outputs.admin_dir }}/app/build/outputs/apk/debug/*.apk
+          name: AI-Scanner-APK
+          path: output/*.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
