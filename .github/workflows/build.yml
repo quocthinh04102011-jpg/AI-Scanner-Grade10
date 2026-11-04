@@ -12,96 +12,114 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Lay ma nguon
+      # 1. Lay ma nguon GitHub
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Java 17
+      # 2. Cai Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # 3. Tim Android SDK co san tren GitHub runner
-      - name: Locate Android SDK
+      # 3. Cai Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 4. Tim sdkmanager
+      - name: Locate sdkmanager
+        id: sdk
         shell: bash
         run: |
           set -e
 
-          if [ -z "$ANDROID_HOME" ]; then
-            echo "ERROR: ANDROID_HOME is missing"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+          if [ -z "$SDK_ROOT" ]; then
+            echo "ERROR: Android SDK path not found"
             exit 1
           fi
 
-          echo "Android SDK: $ANDROID_HOME"
+          echo "Android SDK: $SDK_ROOT"
 
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager 2>/dev/null | head -n 1)
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          if [ -z "$SDKMANAGER" ]; then
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" \
+              -type f -name sdkmanager 2>/dev/null | head -n 1)
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -f "$SDKMANAGER" ]; then
             echo "ERROR: sdkmanager not found"
-            find "$ANDROID_HOME" -maxdepth 4 -type f
+            find "$SDK_ROOT" -maxdepth 5 -type f
             exit 1
           fi
 
-          echo "SDKMANAGER=$SDKMAN" >> "$GITHUB_ENV"
+          echo "sdkmanager found: $SDKMAN"
+          echo "sdkmanager=$SDKMAN" >> "$GITHUB_OUTPUT"
+          echo "sdk_root=$SDK_ROOT" >> "$GITHUB_OUTPUT"
 
-          SDK_BIN=$(dirname "$SDKMANAGER")
-          echo "$SDK_BIN" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-
-      # 4. Chap nhan Android licenses
+      # 5. Chap nhan Android licenses
       - name: Accept Android SDK licenses
         shell: bash
         run: |
           set -e
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
-      # 5. Cai Android SDK packages
-      # Khong yeu cau package tools cu
-      - name: Install Android SDK
+          SDKMANAGER="${{ steps.sdk.outputs.sdkmanager }}"
+          SDK_ROOT="${{ steps.sdk.outputs.sdk_root }}"
+
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses || true
+
+      # 6. Cai Android SDK packages
+      - name: Install Android SDK packages
         shell: bash
         run: |
           set -e
 
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "platform-tools"
+          SDKMANAGER="${{ steps.sdk.outputs.sdkmanager }}"
+          SDK_ROOT="${{ steps.sdk.outputs.sdk_root }}"
 
-      # 6. Gradle 8.9
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # 7. Cai Gradle 8.9
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      # 7. Tim ZIP ma nguon
+      # 8. Tim ZIP ma nguon
       - name: Find source ZIP
         id: zip
         shell: bash
         run: |
           set -e
 
-          ZIP_FILE=$(find . \
-            -maxdepth 2 \
-            -type f \
-            -iname "*.zip" \
-            ! -path "./.git/*" \
-            | head -n 1)
+          ZIP_FILE=""
+
+          if [ -f "AI_Scanner_Grade10_Starter.zip" ]; then
+            ZIP_FILE="AI_Scanner_Grade10_Starter.zip"
+          else
+            ZIP_FILE=$(find . -maxdepth 3 \
+              -type f -iname "*.zip" \
+              ! -path "./.git/*" | head -n 1)
+          fi
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: Source ZIP not found"
             echo "Repository files:"
-            find . -maxdepth 3 -type f
+            find . -maxdepth 4 -type f
             exit 1
           fi
 
-          echo "Found ZIP: $ZIP_FILE"
+          echo "Source ZIP: $ZIP_FILE"
           echo "zip=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
-      # 8. Giai nen ZIP
-      - name: Extract source
+      # 9. Giai nen ZIP
+      - name: Extract source ZIP
         shell: bash
         run: |
           set -e
@@ -111,9 +129,9 @@ jobs:
           unzip -o "${{ steps.zip.outputs.zip }}" -d source
 
           echo "Extracted folders:"
-          find source -maxdepth 4 -type d
+          find source -maxdepth 5 -type d
 
-      # 9. Tim project USER va ADMIN
+      # 10. Tim USER va ADMIN project
       - name: Locate Android projects
         id: projects
         shell: bash
@@ -128,13 +146,13 @@ jobs:
 
           if [ -z "$USER_DIR" ]; then
             echo "ERROR: user-android not found"
-            find source -maxdepth 5 -type d
+            find source -maxdepth 6 -type d
             exit 1
           fi
 
           if [ -z "$ADMIN_DIR" ]; then
             echo "ERROR: admin-android not found"
-            find source -maxdepth 5 -type d
+            find source -maxdepth 6 -type d
             exit 1
           fi
 
@@ -144,7 +162,7 @@ jobs:
           echo "user_dir=$USER_DIR" >> "$GITHUB_OUTPUT"
           echo "admin_dir=$ADMIN_DIR" >> "$GITHUB_OUTPUT"
 
-      # 10. Build USER APK
+      # 11. Build USER APK
       - name: Build USER APK
         shell: bash
         run: |
@@ -155,11 +173,16 @@ jobs:
           if [ -f "gradlew" ]; then
             chmod +x gradlew
             ./gradlew assembleDebug
-          else
+          elif [ -f "build.gradle" ] || \
+               [ -f "build.gradle.kts" ]; then
             gradle assembleDebug
+          else
+            echo "ERROR: USER Gradle project not found"
+            ls -la
+            exit 1
           fi
 
-      # 11. Build ADMIN APK
+      # 12. Build ADMIN APK
       - name: Build ADMIN APK
         shell: bash
         run: |
@@ -170,11 +193,16 @@ jobs:
           if [ -f "gradlew" ]; then
             chmod +x gradlew
             ./gradlew assembleDebug
-          else
+          elif [ -f "build.gradle" ] || \
+               [ -f "build.gradle.kts" ]; then
             gradle assembleDebug
+          else
+            echo "ERROR: ADMIN Gradle project not found"
+            ls -la
+            exit 1
           fi
 
-      # 12. Kiem tra APK
+      # 13. Kiem tra APK
       - name: Check APK files
         shell: bash
         run: |
@@ -199,7 +227,7 @@ jobs:
             exit 1
           fi
 
-      # 13. Upload APK
+      # 14. Upload APK
       - name: Upload APK files
         uses: actions/upload-artifact@v4
         with:
